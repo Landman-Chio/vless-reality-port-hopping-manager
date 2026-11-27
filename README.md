@@ -1,25 +1,30 @@
-# VLESS + REALITY TCP Port-Hopping Manager
+# VLESS + REALITY / TLS TCP Port-Hopping Manager
 
-A standalone Bash manager for deploying an Xray-core **VLESS + TCP + REALITY** inbound with server-side TCP destination-port redirection using nftables.
+Standalone Bash manager for Xray-core VLESS + TCP, with two selectable security / camouflage modes.
 
-> **Status: early development (v0.1.0).** Test on a disposable VPS before production use. This is not yet a feature-complete replacement for the Hysteria 2 manager.
+> **Development status: v0.2.0 (early / not production validated).** Test on a disposable Debian/Ubuntu VPS first. Review the script before running it as root.
 
-## Features in this first version
+## Modes
 
-- Install Xray-core using the official XTLS/Xray-install script.
-- Generate a UUID, REALITY X25519 key pair and short ID.
-- Configure one VLESS + TCP + REALITY inbound (Vision flow).
-- Use nftables to redirect a configurable TCP port range to the Xray listening port.
-- Persist the nftables rule with a systemd oneshot service.
-- Display client parameters and a VLESS share URI.
-- View service status/logs, restart and back up configuration.
+### 1. REALITY camouflage
 
-## Requirements
+- Uses a third-party TLS website as the REALITY handshake destination/SNI.
+- Generates UUID, X25519 key pair and short ID.
+- Does **not** require a certificate for the node domain.
+- The chosen SNI/destination must be reachable and correctly configured for REALITY.
 
-- Debian/Ubuntu VPS with root access and systemd.
-- A public IPv4/IPv6 address or DNS name pointing to the VPS.
-- A reachable REALITY SNI domain. Choose an SNI that is appropriate for your network environment.
-- TCP access to the selected hop-port range in the provider firewall/security group.
+### 2. Own domain + Let's Encrypt TLS + website camouflage
+
+- Uses your own DNS name and obtains a certificate with Certbot / Let's Encrypt using HTTP-01 webroot validation.
+- Installs an Nginx static website on TCP 80 and a loopback-only website on 127.0.0.1:8080.
+- Xray terminates TLS on its configured inbound port and sends non-VLESS TLS fallback traffic to the local Nginx website.
+- Cert renewal is handled by the distribution's Certbot timer; after renewal, Xray should be restarted to load renewed certificate files. Verify the timer and renewal on your host.
+
+## TCP port mapping
+
+The manager installs an nftables rule redirecting incoming TCP connections on a configurable port range to the Xray inbound port. Open the full range in your VPS provider firewall/security group.
+
+This is **server-side port mapping**, not client-side automatic port rotation. The user/client must select a port from the range; a standard VLESS client does not automatically hop ports just because the server maps a range.
 
 ## Install
 
@@ -28,7 +33,7 @@ apt-get update && apt-get install -y curl
 bash <(curl -fsSL https://raw.githubusercontent.com/Landman-Chio/vless-reality-port-hopping-manager/main/vless_reality_port_hopping_manager.sh)
 ```
 
-Or clone the repository:
+Or clone and run:
 
 ```bash
 git clone https://github.com/Landman-Chio/vless-reality-port-hopping-manager.git
@@ -37,34 +42,29 @@ chmod +x vless_reality_port_hopping_manager.sh
 sudo ./vless_reality_port_hopping_manager.sh
 ```
 
-## Important: what “port hopping” means here
+## TLS mode prerequisites
 
-This release implements **server-side TCP port mapping**: inbound TCP connections arriving at any port in the configured range are redirected by nftables to the local Xray inbound port.
+- A registered domain with A/AAAA records pointing to this VPS. Remove incorrect AAAA records if IPv6 is not configured.
+- TCP port 80 reachable from the public internet for HTTP-01 certificate issuance and renewal.
+- TCP port 443 (or the selected Xray listener port) and the complete hop range allowed by the VPS firewall.
+- No other service may already occupy the selected Xray listener port.
 
-The generated URI uses the first port in the range as an example. A client can use another port from that range by changing the URI's port. **Automatic client-side port rotation is not implemented in v0.1.0**; a client must select/change the destination port itself. Do not assume that a standard VLESS client automatically hops ports.
+## Security / operational notes
 
-This project currently configures direct outbound traffic only. A landing-IP / upstream proxy outbound, multi-user management, QR-code output, automated client profiles and IPv6-specific firewall tuning are planned, not included in this initial release.
+- Keep `/etc/vless-reality/config.env` private; it contains the REALITY private key in REALITY mode.
+- Backups contain credentials and private keys. Store them securely.
+- The installer writes `/usr/local/etc/xray/config.json`; back up existing Xray configuration before installing.
+- TLS mode configures Nginx and Certbot. It does not remove existing unrelated Nginx sites intentionally, but it disables the packaged default site.
+- Uninstalling this project does not revoke Let's Encrypt certificates or remove system packages.
+- Use only on servers and networks you own or are authorized to administer.
 
-## Firewall
+## Known limitations
 
-Open the configured TCP hop-port range in your VPS provider firewall/security group. The script does not modify UFW/firewalld policies. Ensure the Xray listening port is not inside the hop range.
-
-## Security notes
-
-- Keep `/etc/vless-reality/config.env` private; it contains the REALITY private key.
-- Backups contain secrets. Store them securely.
-- The script replaces `/usr/local/etc/xray/config.json` when configuring this inbound. Back up any existing Xray configuration first.
-- Review the generated config and firewall rules before exposing the service publicly.
-- Use only on systems and networks you own or are authorized to administer.
-
-## Roadmap
-
-- [ ] Client-side port rotation helper and generated client profiles
-- [ ] Optional upstream SOCKS5 / HTTP outbound (landing IP)
-- [ ] Multi-user CRUD and per-user share links
-- [ ] QR-code generation
-- [ ] Safer config migration and rollback
-- [ ] Debian/Ubuntu release testing and automated shell checks
+- No client-side automatic port hopping yet.
+- No upstream SOCKS5 / HTTP landing-IP outbound yet.
+- No multi-user management or QR-code generation yet.
+- No automatic Xray reload hook after Certbot renewal in this release; schedule/reload integration is planned.
+- The first release targets Debian/Ubuntu with systemd, nftables and apt.
 
 ## License
 
